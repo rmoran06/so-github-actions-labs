@@ -1,1 +1,60 @@
-# workflow inicial, lo completaré luego
+name: Multi-OS System Check
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  system-info:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Paso común: crear archivo base
+      - name: Create system info file
+        run: |
+          echo "=== System Information ===" > system-info.txt
+          echo "Runner OS: $RUNNER_OS" >> system-info.txt
+          echo "Machine name: $HOSTNAME" >> system-info.txt
+        shell: bash
+
+      # Linux
+      - name: Linux - System info
+        if: runner.os == 'Linux'
+        run: |
+          echo "=== uname -a ===" >> system-info.txt
+          uname -a >> system-info.txt
+          echo "=== Environment variables (env) ===" >> system-info.txt
+          env >> system-info.txt
+        shell: bash
+
+      # macOS
+      - name: macOS - System info
+        if: runner.os == 'macOS'
+        run: |
+          echo "=== uname -a ===" >> system-info.txt
+          uname -a >> system-info.txt
+          echo "=== Environment variables (env) ===" >> system-info.txt
+          env >> system-info.txt
+        shell: bash
+
+      # Windows
+      - name: Windows - System info
+        if: runner.os == 'Windows'
+        run: |
+          Write-Output "=== systeminfo ===" | Out-File -FilePath system-info.txt -Append
+          systeminfo | Out-File -FilePath system-info.txt -Append
+          Write-Output "=== Environment variables (gci env:) ===" | Out-File -FilePath system-info.txt -Append
+          Get-ChildItem env: | Out-File -FilePath system-info.txt -Append
+        shell: pwsh
+
+      - name: Upload System Info
+        uses: actions/upload-artifact@v4
+        with:
+          name: system-info-${{ matrix.os }}
+          path: system-info.txt
