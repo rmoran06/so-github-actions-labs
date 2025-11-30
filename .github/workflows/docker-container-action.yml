@@ -1,0 +1,72 @@
+name: Docker Container Action Demo
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  docker-demo:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Show Docker version
+        run: docker version
+
+      - name: Build Docker image
+        run: |
+          docker build -t so-actions-demo:latest .
+
+      - name: Prepare host directory for shared volume
+        run: |
+          mkdir -p host-data
+          echo "Archivo creado en el HOST antes de ejecutar el contenedor" > host-data/desde-host.txt
+
+      - name: Run container (detached) with env and volume
+        run: |
+          docker run -d --name so-demo \
+            -e MESSAGE_FROM_HOST="Hola contenedor, te habla el host desde GitHub Actions" \
+            -v "${{ github.workspace }}/host-data:/app/host-data" \
+            so-actions-demo:latest
+
+      - name: Capture container logs
+        run: |
+          docker logs so-demo > container-logs.txt
+          echo "=== Contenido de container-logs.txt ==="
+          cat container-logs.txt
+
+      - name: Monitor container resources (CPU y memoria)
+        run: |
+          # Mostrar estadísticas de CPU y memoria una sola vez
+          docker stats so-demo --no-stream > docker-stats.txt
+          echo "=== Contenido de docker-stats.txt ==="
+          cat docker-stats.txt
+
+      - name: Stop and remove container
+        run: |
+          docker stop so-demo
+          docker rm so-demo
+
+      - name: List host-data directory (comunicación contenedor -> host)
+        run: |
+          echo "=== Archivos en host-data (montado como volumen) ==="
+          ls -l host-data || echo "host-data no existe"
+          echo
+          echo "=== Contenido de host-data/from-container.txt (si existe) ==="
+          if [ -f host-data/from-container.txt ]; then
+            cat host-data/from-container.txt
+          else
+            echo "El contenedor no creó host-data/from-container.txt"
+          fi
+
+      - name: Upload Docker logs and stats as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-container-report
+          path: |
+            container-logs.txt
+            docker-stats.txt
+            host-data/
