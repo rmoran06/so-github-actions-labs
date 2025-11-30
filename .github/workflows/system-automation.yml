@@ -1,0 +1,57 @@
+name: System Automation
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  system-automation:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+
+    # Variable de entorno (incluye un secreto de GitHub)
+    env:
+      MY_SECRET: ${{ secrets.MY_SECRET }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Solo para Linux y macOS: asegurar permisos de ejecución
+      - name: Set execute permission on Bash script (Linux/macOS)
+        if: runner.os == 'Linux' || runner.os == 'macOS'
+        run: chmod +x scripts/system_task.sh
+
+      # Ejecutar script en Linux
+      - name: Run Bash script on Linux
+        if: runner.os == 'Linux'
+        run: |
+          echo "Ejecutando script Bash en Linux..."
+          ./scripts/system_task.sh | tee linux-script.log
+
+      # Ejecutar script en macOS
+      - name: Run Bash script on macOS
+        if: runner.os == 'macOS'
+        run: |
+          echo "Ejecutando script Bash en macOS..."
+          ./scripts/system_task.sh | tee macos-script.log
+
+      # Ejecutar script en Windows (PowerShell)
+      - name: Run PowerShell script on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Write-Host "Ejecutando script PowerShell en Windows..."
+          ./scripts/system_task.ps1 *>&1 | Tee-Object -FilePath windows-script.log
+
+      # Subir artifacts (archivos de salida y logs) por cada SO
+      - name: Upload automation artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: system-automation-${{ runner.os }}
+          path: |
+            *.txt
+            *.log
