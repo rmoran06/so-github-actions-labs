@@ -1,6 +1,5 @@
 name: Deploy to Vercel
 
-# Trigger: ejecutar en push a la rama main
 on:
   push:
     branches: [ main ]
@@ -9,108 +8,110 @@ jobs:
   deploy:
     name: Deploy to Vercel Production
     runs-on: ubuntu-latest
-    
-    # Variables de entorno para validación de secretos
-    env:
-      HAS_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-      HAS_ORG: ${{ secrets.VERCEL_ORG_ID }}
-      HAS_PROJECT: ${{ secrets.VERCEL_PROJECT_ID }}
-    
-    # Solo ejecutar si los secretos están configurados
-    if: env.HAS_TOKEN != '' && env.HAS_ORG != '' && env.HAS_PROJECT != ''
-    
+
     steps:
+      # 1) Comprobar si hay secretos de Vercel configurados
+      - name: Check Vercel secrets
+        id: check_secrets
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          if [ -z "$VERCEL_TOKEN" ] || [ -z "$VERCEL_ORG_ID" ] || [ -z "$VERCEL_PROJECT_ID" ]; then
+            echo "Algún secreto de Vercel NO está configurado. Se omitirá el despliegue."
+            echo "skip_deploy=true" >> $GITHUB_OUTPUT
+          else
+            echo "Todos los secretos de Vercel están configurados. Se ejecutará el despliegue."
+            echo "skip_deploy=false" >> $GITHUB_OUTPUT
+          fi
+
+      # 2) Checkout solo si NO se va a omitir el deploy
       - name: Checkout code
+        if: steps.check_secrets.outputs.skip_deploy == 'false'
         uses: actions/checkout@v4
       
       - name: Setup Node.js 20.x
+        if: steps.check_secrets.outputs.skip_deploy == 'false'
         uses: actions/setup-node@v4
         with:
           node-version: 20.x
           cache: 'npm'
       
       - name: Install dependencies
+        if: steps.check_secrets.outputs.skip_deploy == 'false'
         run: npm ci
       
       - name: Run tests before deploy
+        if: steps.check_secrets.outputs.skip_deploy == 'false'
         run: npm test
         env:
           NODE_ENV: test
       
       - name: Install Vercel CLI
+        if: steps.check_secrets.outputs.skip_deploy == 'false'
         run: npm install -g vercel@latest
       
       - name: Deploy to Vercel Production
+        if: steps.check_secrets.outputs.skip_deploy == 'false'
         id: deploy
         run: |
           echo "Iniciando deployment a Vercel..."
-          
+
           DEPLOYMENT_URL=$(vercel --prod \
-            --token ${{ secrets.VERCEL_TOKEN }} \
-            --scope ${{ secrets.VERCEL_ORG_ID }} \
+            --token "${{ secrets.VERCEL_TOKEN }}" \
+            --scope "${{ secrets.VERCEL_ORG_ID }}" \
             --yes)
-          
+
           echo "deployment_url=$DEPLOYMENT_URL" >> $GITHUB_OUTPUT
-          echo "deployment_status=success" >> $GITHUB_OUTPUT
-          
+
           echo "✓ Deployment exitoso: $DEPLOYMENT_URL"
         continue-on-error: true
       
       - name: Deployment Success
-        if: steps.deploy.outcome == 'success'
+        if: steps.check_secrets.outputs.skip_deploy == 'false' && steps.deploy.outcome == 'success'
         run: |
           echo ""
-          echo "╔════════════════════════════════════════════════════╗"
-          echo "║         DEPLOYMENT EXITOSO A VERCEL              ║"
-          echo "╚════════════════════════════════════════════════════╝"
+          echo "╔════════════════════════════════════════════╗"
+          echo "║        ✅ DEPLOYMENT EXITOSO A VERCEL      ║"
+          echo "╚════════════════════════════════════════════╝"
           echo ""
           echo "🚀 URL de producción: ${{ steps.deploy.outputs.deployment_url }}"
-          echo "✓ La aplicación está ahora disponible públicamente"
-          echo ""
-          echo "📋 Endpoints disponibles:"
-          echo "   - ${{ steps.deploy.outputs.deployment_url }}/"
-          echo "   - ${{ steps.deploy.outputs.deployment_url }}/env"
-          echo "   - ${{ steps.deploy.outputs.deployment_url }}/health"
-          echo "   - ${{ steps.deploy.outputs.deployment_url }}/files"
           echo ""
       
       - name: Deployment Failed - Rollback Instructions
-        if: steps.deploy.outcome == 'failure'
+        if: steps.check_secrets.outputs.skip_deploy == 'false' && steps.deploy.outcome == 'failure'
         run: |
           echo ""
-          echo "╔════════════════════════════════════════════════════╗"
-          echo "║           ⚠️  DEPLOYMENT FALLIDO                   ║"
-          echo "╚════════════════════════════════════════════════════╝"
+          echo "╔════════════════════════════════════════════╗"
+          echo "║           ⚠️  DEPLOYMENT FALLIDO           ║"
+          echo "╚════════════════════════════════════════════╝"
           echo ""
           echo "❌ El deployment a Vercel ha fallado."
           echo ""
           echo "📋 INSTRUCCIONES DE ROLLBACK:"
           echo ""
-          echo "OPCIÓN 1 - Rollback desde Vercel Dashboard:"
-          echo "==========================================="
-          echo "1. Accede a Vercel Dashboard: https://vercel.com/dashboard"
-          echo "2. Ve a tu proyecto"
-          echo "3. Haz clic en la pestaña 'Deployments'"
-          echo "4. Identifica el último deployment estable (con estado 'Ready')"
-          echo "5. Haz clic en los tres puntos (...) del deployment estable"
-          echo "6. Selecciona 'Promote to Production'"
-          echo "7. Confirma la acción"
+          echo "OPCIÓN 1 - Desde el Dashboard de Vercel:"
+          echo "1. Ve a https://vercel.com/dashboard"
+          echo "2. Entra a tu proyecto."
+          echo "3. Abre la pestaña 'Deployments'."
+          echo "4. Busca el último deployment estable (estado 'Ready')."
+          echo "5. Haz clic en '...' y selecciona 'Promote to Production'."
           echo ""
-          echo "OPCIÓN 2 - Rollback desde Vercel CLI:"
-          echo "====================================="
-          echo "1. Instala Vercel CLI si no lo tienes: npm i -g vercel"
-          echo "2. Lista los deployments anteriores:"
-          echo "   vercel ls --token=\$VERCEL_TOKEN"
-          echo "3. Identifica el ID del deployment estable"
-          echo "4. Ejecuta el rollback:"
-          echo "   vercel rollback <deploymentId> --token=\$VERCEL_TOKEN"
-          echo ""
-          echo "Ejemplo:"
-          echo "   vercel rollback dpl_ABC123xyz --token=\$VERCEL_TOKEN"
-          echo ""
-          echo "---"
-          echo ""
-          echo "🔍 Revisa los logs arriba para identificar la causa del error."
-          echo "📞 Si necesitas ayuda, contacta al equipo de soporte."
+          echo "OPCIÓN 2 - Desde la CLI de Vercel:"
+          echo "1. Instala la CLI:  npm i -g vercel"
+          echo "2. Lista los deployments:  vercel ls --token=\$VERCEL_TOKEN"
+          echo "3. Ubica el deployment estable."
+          echo "4. Ejecuta:  vercel rollback <deploymentId> --token=\$VERCEL_TOKEN"
           echo ""
           exit 1
+
+      - name: Deploy skipped (no secrets configured)
+        if: steps.check_secrets.outputs.skip_deploy == 'true'
+        run: |
+          echo ""
+          echo "══════════════════════════════════════════════"
+          echo "  🔎 Deploy a Vercel OMITIDO"
+          echo "  Motivo: faltan secretos VERCEL_TOKEN / VERCEL_ORG_ID / VERCEL_PROJECT_ID"
+          echo "══════════════════════════════════════════════"
+          echo ""
