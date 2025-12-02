@@ -1,0 +1,122 @@
+name: Deploy to Vercel
+
+# Trigger: ejecutar en push a la rama main
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    name: Deploy to Vercel Production
+    runs-on: ubuntu-latest
+    
+    # Variables de entorno para el deployment
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js 20.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Run tests before deploy
+        run: npm test
+        env:
+          NODE_ENV: test
+      
+      - name: Install Vercel CLI
+        run: npm install -g vercel@latest
+      
+      - name: Pull Vercel Environment Information
+        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+      
+      - name: Build Project Artifacts
+        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+      
+      - name: Deploy to Vercel Production
+        id: deploy
+        run: |
+          DEPLOYMENT_URL=$(vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }})
+          echo "deployment_url=$DEPLOYMENT_URL" >> $GITHUB_OUTPUT
+          echo "✓ Deployment exitoso: $DEPLOYMENT_URL"
+        continue-on-error: true
+      
+      - name: Deployment Success
+        if: steps.deploy.outcome == 'success'
+        run: |
+          echo ""
+          echo "╔════════════════════════════════════════════════════╗"
+          echo "║         DEPLOYMENT EXITOSO A VERCEL              ║"
+          echo "╚════════════════════════════════════════════════════╝"
+          echo ""
+          echo "🚀 URL de producción: ${{ steps.deploy.outputs.deployment_url }}"
+          echo "✓ La aplicación está ahora disponible públicamente"
+          echo ""
+          echo "📋 Endpoints disponibles:"
+          echo "   - ${{ steps.deploy.outputs.deployment_url }}/"
+          echo "   - ${{ steps.deploy.outputs.deployment_url }}/env"
+          echo "   - ${{ steps.deploy.outputs.deployment_url }}/health"
+          echo "   - ${{ steps.deploy.outputs.deployment_url }}/files"
+          echo ""
+      
+      - name: Deployment Failed - Rollback Instructions
+        if: steps.deploy.outcome == 'failure'
+        run: |
+          echo ""
+          echo "╔════════════════════════════════════════════════════╗"
+          echo "║           ⚠️  DEPLOYMENT FALLIDO                   ║"
+          echo "╚════════════════════════════════════════════════════╝"
+          echo ""
+          echo "❌ El deployment a Vercel ha fallado."
+          echo ""
+          echo "📋 INSTRUCCIONES DE ROLLBACK:"
+          echo ""
+          echo "1. Accede a Vercel Dashboard:"
+          echo "   https://vercel.com/dashboard"
+          echo ""
+          echo "2. Navega a tu proyecto: ${{ secrets.VERCEL_PROJECT_ID }}"
+          echo ""
+          echo "3. Ve a la pestaña 'Deployments'"
+          echo ""
+          echo "4. Encuentra el último deployment exitoso"
+          echo ""
+          echo "5. Haz clic en los tres puntos (...) del deployment exitoso"
+          echo ""
+          echo "6. Selecciona 'Promote to Production'"
+          echo ""
+          echo "---"
+          echo ""
+          echo "Alternativamente, puedes hacer rollback desde la CLI:"
+          echo ""
+          echo "   vercel rollback [deployment-url] --token=\$VERCEL_TOKEN"
+          echo ""
+          echo "Para ver deployments anteriores:"
+          echo ""
+          echo "   vercel ls --token=\$VERCEL_TOKEN"
+          echo ""
+          echo "---"
+          echo ""
+          echo "🔍 Revisa los logs arriba para identificar el error."
+          echo ""
+          exit 1
+      
+      - name: Comment deployment URL on PR
+        if: github.event_name == 'pull_request' && steps.deploy.outcome == 'success'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `🚀 **Deployment Preview**\n\nURL: ${{ steps.deploy.outputs.deployment_url }}\n\n✅ La aplicación ha sido desplegada exitosamente.`
+            })

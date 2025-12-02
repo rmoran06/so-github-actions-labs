@@ -1,0 +1,121 @@
+name: Security Scan
+
+# Trigger: ejecutar en push y pull_request a la rama main
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  security:
+    name: Security Audit and Permissions Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js 20.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20.x
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Run npm audit
+        run: |
+          echo "=== Ejecutando npm audit ==="
+          npm audit --json > security-audit.json || true
+          
+          echo ""
+          echo "=== Resumen de Vulnerabilidades ==="
+          if command -v jq &> /dev/null; then
+            cat security-audit.json | jq -r '.metadata | "Total: \(.vulnerabilities.total) | Info: \(.vulnerabilities.info) | Low: \(.vulnerabilities.low) | Moderate: \(.vulnerabilities.moderate) | High: \(.vulnerabilities.high) | Critical: \(.vulnerabilities.critical)"'
+          else
+            cat security-audit.json
+          fi
+          
+          echo ""
+          echo "✓ Escaneo de seguridad completado (ver archivo security-audit.json para detalles)"
+        continue-on-error: true
+      
+      - name: Check file permissions
+        run: |
+          echo "=== Verificación de Permisos de Archivos Clave ===" > permissions-report.txt
+          echo "" >> permissions-report.txt
+          
+          echo "Verificando permisos de archivos críticos..." >> permissions-report.txt
+          echo "" >> permissions-report.txt
+          
+          # Verificar src/server.js
+          if [ -f "src/server.js" ]; then
+            echo "--- src/server.js ---" >> permissions-report.txt
+            ls -l src/server.js >> permissions-report.txt
+            stat src/server.js >> permissions-report.txt
+            echo "" >> permissions-report.txt
+          fi
+          
+          # Verificar Dockerfile
+          if [ -f "Dockerfile" ]; then
+            echo "--- Dockerfile ---" >> permissions-report.txt
+            ls -l Dockerfile >> permissions-report.txt
+            stat Dockerfile >> permissions-report.txt
+            echo "" >> permissions-report.txt
+          fi
+          
+          # Verificar scripts
+          if [ -d "scripts" ]; then
+            echo "--- Scripts ---" >> permissions-report.txt
+            ls -l scripts/ >> permissions-report.txt
+            for script in scripts/*; do
+              if [ -f "$script" ]; then
+                echo "" >> permissions-report.txt
+                echo "Detalles de $script:" >> permissions-report.txt
+                stat "$script" >> permissions-report.txt
+              fi
+            done
+            echo "" >> permissions-report.txt
+          fi
+          
+          # Verificar package.json
+          if [ -f "package.json" ]; then
+            echo "--- package.json ---" >> permissions-report.txt
+            ls -l package.json >> permissions-report.txt
+            stat package.json >> permissions-report.txt
+            echo "" >> permissions-report.txt
+          fi
+          
+          echo "=== Fin del Reporte de Permisos ===" >> permissions-report.txt
+          
+          # Mostrar en consola
+          cat permissions-report.txt
+      
+      - name: Display security summary
+        run: |
+          echo ""
+          echo "╔════════════════════════════════════════════════════╗"
+          echo "║       RESUMEN DE ESCANEO DE SEGURIDAD             ║"
+          echo "╚════════════════════════════════════════════════════╝"
+          echo ""
+          echo "✓ Escaneo de vulnerabilidades completado"
+          echo "✓ Verificación de permisos completada"
+          echo ""
+          echo "📋 Los reportes detallados están disponibles como artifacts:"
+          echo "   - security-audit.json"
+          echo "   - permissions-report.txt"
+          echo ""
+          echo "⚠️  NOTA: Este workflow NO falla aunque se detecten vulnerabilidades."
+          echo "    Revisa los artifacts para análisis detallado."
+          echo ""
+      
+      - name: Upload security reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-report
+          path: |
+            security-audit.json
+            permissions-report.txt
+          retention-days: 90
