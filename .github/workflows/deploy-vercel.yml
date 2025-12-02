@@ -10,10 +10,8 @@ jobs:
     name: Deploy to Vercel Production
     runs-on: ubuntu-latest
     
-    # Variables de entorno para el deployment
-    env:
-      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+    # Solo ejecutar si los secretos están configurados
+    if: ${{ secrets.VERCEL_TOKEN != '' && secrets.VERCEL_ORG_ID != '' && secrets.VERCEL_PROJECT_ID != '' }}
     
     steps:
       - name: Checkout code
@@ -36,19 +34,24 @@ jobs:
       - name: Install Vercel CLI
         run: npm install -g vercel@latest
       
-      - name: Pull Vercel Environment Information
-        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
-      
-      - name: Build Project Artifacts
-        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
-      
       - name: Deploy to Vercel Production
         id: deploy
         run: |
-          DEPLOYMENT_URL=$(vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }})
+          echo "Iniciando deployment a Vercel..."
+          
+          DEPLOYMENT_URL=$(vercel --prod \
+            --token ${{ secrets.VERCEL_TOKEN }} \
+            --scope ${{ secrets.VERCEL_ORG_ID }} \
+            --yes)
+          
           echo "deployment_url=$DEPLOYMENT_URL" >> $GITHUB_OUTPUT
+          echo "deployment_status=success" >> $GITHUB_OUTPUT
+          
           echo "✓ Deployment exitoso: $DEPLOYMENT_URL"
         continue-on-error: true
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
       
       - name: Deployment Success
         if: steps.deploy.outcome == 'success'
@@ -80,43 +83,31 @@ jobs:
           echo ""
           echo "📋 INSTRUCCIONES DE ROLLBACK:"
           echo ""
-          echo "1. Accede a Vercel Dashboard:"
-          echo "   https://vercel.com/dashboard"
-          echo ""
-          echo "2. Navega a tu proyecto: ${{ secrets.VERCEL_PROJECT_ID }}"
-          echo ""
-          echo "3. Ve a la pestaña 'Deployments'"
-          echo ""
-          echo "4. Encuentra el último deployment exitoso"
-          echo ""
-          echo "5. Haz clic en los tres puntos (...) del deployment exitoso"
-          echo ""
+          echo "OPCIÓN 1 - Rollback desde Vercel Dashboard:"
+          echo "==========================================="
+          echo "1. Accede a Vercel Dashboard: https://vercel.com/dashboard"
+          echo "2. Ve a tu proyecto"
+          echo "3. Haz clic en la pestaña 'Deployments'"
+          echo "4. Identifica el último deployment estable (con estado 'Ready')"
+          echo "5. Haz clic en los tres puntos (...) del deployment estable"
           echo "6. Selecciona 'Promote to Production'"
+          echo "7. Confirma la acción"
           echo ""
-          echo "---"
-          echo ""
-          echo "Alternativamente, puedes hacer rollback desde la CLI:"
-          echo ""
-          echo "   vercel rollback [deployment-url] --token=\$VERCEL_TOKEN"
-          echo ""
-          echo "Para ver deployments anteriores:"
-          echo ""
+          echo "OPCIÓN 2 - Rollback desde Vercel CLI:"
+          echo "====================================="
+          echo "1. Instala Vercel CLI si no lo tienes: npm i -g vercel"
+          echo "2. Lista los deployments anteriores:"
           echo "   vercel ls --token=\$VERCEL_TOKEN"
+          echo "3. Identifica el ID del deployment estable"
+          echo "4. Ejecuta el rollback:"
+          echo "   vercel rollback <deploymentId> --token=\$VERCEL_TOKEN"
+          echo ""
+          echo "Ejemplo:"
+          echo "   vercel rollback dpl_ABC123xyz --token=\$VERCEL_TOKEN"
           echo ""
           echo "---"
           echo ""
-          echo "🔍 Revisa los logs arriba para identificar el error."
+          echo "🔍 Revisa los logs arriba para identificar la causa del error."
+          echo "📞 Si necesitas ayuda, contacta al equipo de soporte."
           echo ""
           exit 1
-      
-      - name: Comment deployment URL on PR
-        if: github.event_name == 'pull_request' && steps.deploy.outcome == 'success'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: `🚀 **Deployment Preview**\n\nURL: ${{ steps.deploy.outputs.deployment_url }}\n\n✅ La aplicación ha sido desplegada exitosamente.`
-            })

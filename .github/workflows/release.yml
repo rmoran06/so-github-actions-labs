@@ -8,7 +8,7 @@ on:
 
 jobs:
   release:
-    name: Create Release
+    name: Create Release and Upload Assets
     runs-on: ubuntu-latest
     
     permissions:
@@ -32,113 +32,89 @@ jobs:
         env:
           NODE_ENV: test
       
+      - name: Generate coverage report
+        run: npm run test:coverage --if-present
+        continue-on-error: true
+        env:
+          NODE_ENV: test
+      
       - name: Get tag name
         id: tag_name
         run: echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
       
-      - name: Generate release notes
-        id: release_notes
-        run: |
-          RELEASE_DATE=$(date '+%Y-%m-%d %H:%M:%S UTC')
-          TAG_NAME="${{ steps.tag_name.outputs.TAG }}"
-          
-          cat > RELEASE_NOTES.md << EOF
-          # Release $TAG_NAME
-          
-          **Fecha de release:** $RELEASE_DATE
-          
-          ## 📦 Contenido del Release
-          
-          Este release incluye:
-          - Aplicación Node.js/Express con endpoints de sistema y gestión de archivos
-          - Tests automatizados con Jest y Supertest
-          - Dockerfile para containerización
-          - Scripts de automatización multi-plataforma
-          - Sistema de logs automático
-          - Endpoints de gestión de archivos
-          
-          ## 🚀 Características Principales
-          
-          - **Sistema de Logs**: Registro automático de todas las peticiones HTTP en \`logs/app.log\`
-          - **Gestión de Archivos**: Endpoints para crear, listar y leer archivos en \`data/\`
-          - **Multi-OS Testing**: Probado en Ubuntu, Windows y macOS
-          - **CI/CD Completo**: Workflows de GitHub Actions para testing, seguridad y deployment
-          
-          ## 📋 Endpoints Disponibles
-          
-          - \`GET /\` - Información del sistema
-          - \`GET /env\` - Variables de entorno
-          - \`GET /health\` - Health check
-          - \`GET /files\` - Listar archivos
-          - \`POST /files\` - Crear archivo
-          - \`GET /files/:name\` - Leer archivo específico
-          
-          ## 🔧 Instalación
-          
-          \`\`\`bash
-          npm install
-          npm start
-          \`\`\`
-          
-          ## 🧪 Testing
-          
-          \`\`\`bash
-          npm test
-          npm run test:coverage
-          \`\`\`
-          
-          ---
-          
-          **Tag:** $TAG_NAME  
-          **Commit:** \`${GITHUB_SHA:0:7}\`  
-          **Generado automáticamente por GitHub Actions**
-          EOF
-          
-          cat RELEASE_NOTES.md
-      
       - name: Package application
+        id: package
         run: |
-          # Crear directorio para el release
-          mkdir -p release-package
+          TAG_NAME="${{ steps.tag_name.outputs.TAG }}"
+          PACKAGE_NAME="so-cicd-app-${TAG_NAME}.tar.gz"
           
-          # Copiar archivos necesarios
-          cp -r src/ release-package/
-          cp package.json release-package/
-          cp package-lock.json release-package/
-          cp Dockerfile release-package/
-          cp README.md release-package/ 2>/dev/null || echo "README.md no encontrado"
+          echo "Empaquetando aplicación para release ${TAG_NAME}..."
           
-          # Copiar scripts si existen
-          if [ -d "scripts" ]; then
-            cp -r scripts/ release-package/
-          fi
+          # Crear archivo tar.gz con los componentes necesarios
+          tar -czf "${PACKAGE_NAME}" \
+            src/ \
+            package.json \
+            package-lock.json \
+            Dockerfile
           
-          # Crear archivo de información del release
-          cat > release-package/RELEASE_INFO.txt << EOF
-          Release: ${{ steps.tag_name.outputs.TAG }}
-          Build Date: $(date -u)
-          Commit: ${GITHUB_SHA}
-          Repository: ${GITHUB_REPOSITORY}
-          EOF
+          echo "✓ Aplicación empaquetada exitosamente: ${PACKAGE_NAME}"
+          ls -lh "${PACKAGE_NAME}"
           
-          # Crear el archivo zip
-          cd release-package
-          zip -r ../so-cicd-app-${{ steps.tag_name.outputs.TAG }}.zip .
-          cd ..
-          
-          echo "✓ Aplicación empaquetada exitosamente"
-          ls -lh so-cicd-app-*.zip
+          # Guardar nombre del paquete para pasos siguientes
+          echo "package_name=${PACKAGE_NAME}" >> $GITHUB_OUTPUT
       
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
-        with:
-          name: Release ${{ steps.tag_name.outputs.TAG }}
-          body_path: RELEASE_NOTES.md
-          files: so-cicd-app-${{ steps.tag_name.outputs.TAG }}.zip
-          draft: false
-          prerelease: false
+        id: create_release
+        uses: actions/create-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ steps.tag_name.outputs.TAG }}
+          body: |
+            ## Release ${{ steps.tag_name.outputs.TAG }}
+            
+            **Fecha:** ${{ github.event.head_commit.timestamp }}
+            **Commit:** ${{ github.sha }}
+            
+            ### 📦 Contenido del Release
+            
+            Este release incluye:
+            - Aplicación Node.js/Express
+            - Tests automatizados con Jest
+            - Dockerfile para containerización
+            - Sistema de logs automático
+            - Endpoints de gestión de archivos
+            
+            ### 🚀 Instalación
+            
+            ```bash
+            tar -xzf ${{ steps.package.outputs.package_name }}
+            npm install
+            npm start
+            ```
+            
+            ### 🧪 Testing
+            
+            ```bash
+            npm test
+            ```
+            
+            ---
+            
+            Generado automáticamente por GitHub Actions
+          draft: false
+          prerelease: false
+      
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./${{ steps.package.outputs.package_name }}
+          asset_name: ${{ steps.package.outputs.package_name }}
+          asset_content_type: application/gzip
       
       - name: Release summary
         run: |
@@ -148,6 +124,6 @@ jobs:
           echo "╚════════════════════════════════════════════════════╝"
           echo ""
           echo "🏷️  Tag: ${{ steps.tag_name.outputs.TAG }}"
-          echo "📦 Package: so-cicd-app-${{ steps.tag_name.outputs.TAG }}.zip"
+          echo "📦 Package: ${{ steps.package.outputs.package_name }}"
           echo "🔗 URL: https://github.com/${{ github.repository }}/releases/tag/${{ steps.tag_name.outputs.TAG }}"
           echo ""
